@@ -1,0 +1,223 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+
+# ==========================================
+# Config & Constants (from your Vinay Diamonds script)
+# ==========================================
+ALLOWED_COLOR = ["D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]
+ALLOWED_CLARITY = ["IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2"]
+ALLOWED_CUT = ["EX", "VG"]
+ALLOWED_FLOUR = ["NON", "FNT", "MED", "NONE"]
+EXCLUDED_INCLUSION = ["BT0 BC2", "BT1 BC2", "BT1 BC3", "BT2 BC2"]
+EXCLUDED_KEY_SYMBOLS = ["Cavity", "Cavity, Chip", "Chip, Cavity", "Chip"]
+
+COLUMNS_MAPPING = {
+    "SRNO": [],
+    "LOTNO": ["ReportNumber"],
+    "CARAT": ["Carats"],
+    "SHAPE": ["Shape"],
+    "COLOR": ["Color"],
+    "CLARITY": ["Clarity"],
+    "CUT": ["Cut"],
+    "POL": ["Polish"],
+    "SYM": ["Sym"],
+    "FLRC": ["Fls"],
+    "LENGTH": [],
+    "WIDTH": [],
+    "HEIGHT": [],
+    "TABLE": ["Table%"],
+    "DEPTH": ["Depth%"],
+    "LAB": ["LAB"],
+    "DISC": ["Net%"],
+    "TINCH": [],
+    "NATTS": [],
+    "RATIO": [],
+    "RAP": [],
+    "LUSTER": [],
+    "T OPENS": [],
+    "B OPENS": [],
+    'Natts1':['Inclusion'],
+    'Natts2':[],
+    "Stone id":['StoneID']
+}
+
+# =====================
+# Utility helpers
+# =====================
+def _sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
+    # Trim headers & drop Excel Unnamed columns
+    df.columns = [str(c).strip() for c in df.columns]
+    df = df.loc[:, ~df.columns.astype(str).str.startswith("Unnamed")]
+
+    # Clean object cells
+    for col in df.columns:
+        if df[col].dtype == "object":
+            def _fix(x):
+                if isinstance(x, (bytes, bytearray)):
+                    try:
+                        x = x.decode("utf-8", "ignore")
+                    except Exception:
+                        x = str(x)
+                if isinstance(x, str):
+                    return x.strip()
+                return x
+            df[col] = df[col].map(_fix)
+
+    # Numeric coercions for used columns
+    for num in ["Net%", "Carats", "Table%", "Depth%"]:
+        if num in df.columns:
+            df[num] = pd.to_numeric(df[num], errors="coerce")
+
+    return df
+
+
+def read_excel(uploaded_file, skiprows: int = 1) -> pd.DataFrame:
+    df = pd.read_excel(uploaded_file, skiprows=skiprows)
+    df = _sanitize_df(df)
+    # Standardize Shape RD->ROUND per script
+    if "Shape" in df.columns:
+        df["Shape"] = df["Shape"].replace("RD", "ROUND")
+    return df
+
+
+def numeric(df: pd.DataFrame, col: str) -> pd.DataFrame:
+    if col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def equal(df: pd.DataFrame, col: str, value) -> pd.DataFrame:
+    if col in df.columns:
+        return df[df[col] == value]
+    return df
+
+
+def isin(df: pd.DataFrame, col: str, values) -> pd.DataFrame:
+    if col in df.columns:
+        return df[df[col].isin(values)]
+    return df
+
+
+def notin(df: pd.DataFrame, col: str, values) -> pd.DataFrame:
+    if col in df.columns:
+        return df[~df[col].isin(values)]
+    return df
+
+
+def between(df: pd.DataFrame, col: str, low, high, inclusive: str = "both") -> pd.DataFrame:
+    if col in df.columns:
+        df = numeric(df, col)
+        return df[df[col].between(low, high, inclusive=inclusive)]
+    return df
+
+# =====================
+# Core filter pipeline (mirrors your script)
+# =====================
+def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
+    df = equal(df, "LAB", "GIA")
+    # Keep RD (will already be standardized to ROUND above) or ROUND
+    df = df[df["Shape"].isin(["RD", "ROUND"]) ] if "Shape" in df.columns else df
+    df = equal(df, "Shape", "ROUND") if "Shape" in df.columns else df
+
+    if "Net%" in df.columns:
+        df = df[df["Net%"] <= -10]
+
+    df = between(df, "Carats", 0.30, 3.99, inclusive="both")
+
+    # Lists
+    df = isin(df, "Color", ALLOWED_COLOR)
+    df = isin(df, "Clarity", ALLOWED_CLARITY)
+    df = isin(df, "Cut", ALLOWED_CUT)
+    df = isin(df, "Polish", ALLOWED_CUT)
+    df = isin(df, "Sym", ALLOWED_CUT)
+    df = isin(df, "Fls", ALLOWED_FLOUR)
+
+    # Exclusions
+    if "Inclusion" in df.columns:
+        df = notin(df, "Inclusion", EXCLUDED_INCLUSION)
+
+    for key_col in ["KeytoSymbols", "Key To Symbols", "Key To Symbol", "Key To Sym"]:
+        if key_col in df.columns:
+            df = notin(df, key_col, EXCLUDED_KEY_SYMBOLS)
+
+    return df
+
+
+# =====================
+# Output shaping
+# =====================
+def fix_columns(df: pd.DataFrame) -> pd.DataFrame:
+    rename_map = {src: tgt for tgt, sources in COLUMNS_MAPPING.items() for src in (sources + [tgt])}
+    # Trim headers again to catch variants then rename
+    df = df.rename(columns={c: c.strip() for c in df.columns}).rename(columns=rename_map)
+
+    # Ensure all expected columns exist
+    for col in COLUMNS_MAPPING:
+        if col not in df.columns:
+            df[col] = np.nan
+
+    # Defaults
+    for col in ["LENGTH", "WIDTH", "HEIGHT", "RATIO", "RAP"]:
+        df[col] = 0
+
+    df["SRNO"] = range(1, len(df) + 1)
+
+    for col in ["TINCH", "LUSTER", "T OPENS", "B OPENS"]:
+        df[col] = "N/A"
+
+    df["NATTS"] = "CENTER - L"
+    df["SHAPE"] = "ROUND"
+
+    for num_col in ["CARAT", "TABLE", "DEPTH", "DISC", "RATIO", "RAP", "LENGTH", "WIDTH", "HEIGHT"]:
+        if num_col in df.columns:
+            df[num_col] = pd.to_numeric(df[num_col], errors="coerce")
+    if "DISC" in df.columns:
+        df["DISC"] = df["DISC"].round(2)
+
+    return df[list(COLUMNS_MAPPING)]
+
+
+# =====================
+# App
+# =====================
+def run_vinay_diamonds_mod() -> None:
+    st.header("Vinay Diamonds")
+
+    with st.sidebar:
+        upload = st.file_uploader("Select Excel file", type=["xlsx", "xls"])
+        skip = st.number_input("Skip rows", 0, 10000, 1, 1)
+
+    if not upload:
+        st.info("Upload a file to begin.")
+        st.stop()
+
+    try:
+        df = read_excel(upload, skiprows=skip)
+    except Exception as e:
+        st.error(f"Failed to read file: {e}")
+        st.stop()
+
+    st.subheader("Raw data (sanitized)")
+    st.dataframe(df)
+
+    df_filtered = apply_filters(df)
+    df_out = fix_columns(df_filtered.copy())
+
+    st.subheader("Filtered & Mapped Output")
+    st.dataframe(df_out)
+
+    file_name = f"vinay diamonds {pd.Timestamp.now():%d.%m.%Y}.csv"
+    csv_bytes = df_out.to_csv(index=False)
+
+    with st.sidebar:
+        st.download_button(
+            label="Download CSV",
+            data=csv_bytes,
+            file_name=file_name,
+            mime="csv",
+            
+        )
+
+if __name__ == "__main__":
+    run_vinay_diamonds_mod()
