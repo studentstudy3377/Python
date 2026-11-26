@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Record Video Frame</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+            padding: 20px;
+        }
+
+        #video-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px auto;
+            gap: 10px;
+            width: 1000px;
+            height: 600px;
+            border: 2px solid #4CAF50;
+            border-radius: 10px;
+            overflow: hidden;
+            background-color: #000;
+        }
+
+        .video-frame {
+            width: 50%;
+            height: 100%;
+            overflow: hidden;
+            position: relative;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .controls {
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 5px;
+            border: none;
+            background-color: #4CAF50;
+            color: white;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        button:hover:not(:disabled) {
+            background-color: #45a049;
+        }
+
+        input[type="file"] {
+            margin: 10px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <h1></h1>
+
+    <div id="video-container">
+        <div class="video-frame">
+            <video id="video1" controls>
+                <source id="videoSource1" src="" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+        <div class="video-frame">
+            <video id="video2" controls>
+                <source id="videoSource2" src="" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+    </div>
+
+    <div class="controls">
+        <input type="file" id="videoInput1" accept="video/*" />
+        <input type="file" id="videoInput2" accept="video/*" />
+        <br />
+        <button id="playButton" disabled>Play Both Videos</button>
+        <button id="stopButton" disabled>Stop Both Videos</button>
+        <br />
+        <button id="startRecordingButton">Start Screen Recording</button>
+        <button id="stopRecordingButton" disabled>Stop Screen Recording</button>
+    </div>
+
+    <script>
+        const videoElement1 = document.getElementById('video1');
+        const videoElement2 = document.getElementById('video2');
+        const videoInput1 = document.getElementById('videoInput1');
+        const videoInput2 = document.getElementById('videoInput2');
+        const playButton = document.getElementById('playButton');
+        const stopButton = document.getElementById('stopButton');
+        const startRecordingButton = document.getElementById('startRecordingButton');
+        const stopRecordingButton = document.getElementById('stopRecordingButton');
+
+        let mediaRecorder;
+        let recordedChunks = [];
+
+        const canvas = document.createElement('canvas');
+        const canvasCtx = canvas.getContext('2d');
+
+        videoInput1.addEventListener('change', (event) => {
+            const file1 = event.target.files[0];
+            if (file1) {
+                const videoURL1 = URL.createObjectURL(file1);
+                videoElement1.src = videoURL1;
+                playButton.disabled = false;
+            }
+        });
+
+        videoInput2.addEventListener('change', (event) => {
+            const file2 = event.target.files[0];
+            if (file2) {
+                const videoURL2 = URL.createObjectURL(file2);
+                videoElement2.src = videoURL2;
+                playButton.disabled = false;
+            }
+        });
+
+        playButton.addEventListener('click', () => {
+            videoElement1.play();
+            videoElement2.play();
+            playButton.disabled = true;
+            stopButton.disabled = false;
+        });
+
+        stopButton.addEventListener('click', () => {
+            videoElement1.pause();
+            videoElement2.pause();
+            videoElement1.currentTime = 0;
+            videoElement2.currentTime = 0;
+            playButton.disabled = false;
+            stopButton.disabled = true;
+        });
+
+        startRecordingButton.addEventListener('click', () => {
+            startRecordingButton.disabled = true;
+            stopRecordingButton.disabled = false;
+
+            const video1Width = videoElement1.videoWidth;
+            const video1Height = videoElement1.videoHeight;
+            const video2Width = videoElement2.videoWidth;
+            const video2Height = videoElement2.videoHeight;
+
+            // Set canvas size based on video dimensions
+            canvas.width = video1Width + video2Width;
+            canvas.height = Math.max(video1Height, video2Height);
+
+            // Configure MediaRecorder
+            const stream = canvas.captureStream(120); // Use 120 FPS for smooth recording
+            mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'video/webm; codecs=vp9',
+                videoBitsPerSecond: 900000000 // 9000 Mbps for high-quality 1080p HD at 120 FPS
+            });
+
+            recordedChunks = [];
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'recording.mp4';
+                a.click();
+            };
+
+            mediaRecorder.start();
+
+            function drawVideosToCanvas() {
+                canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Draw the first video at its native size
+                canvasCtx.drawImage(videoElement1, 0, 0, video1Width, video1Height);
+
+                // Draw the second video next to the first one at its native size
+                canvasCtx.drawImage(videoElement2, video1Width, 0, video2Width, video2Height);
+
+                if (mediaRecorder.state === 'recording') {
+                    requestAnimationFrame(drawVideosToCanvas);
+                }
+            }
+
+            drawVideosToCanvas();
+        });
+
+        stopRecordingButton.addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                stopRecordingButton.disabled = true;
+                startRecordingButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

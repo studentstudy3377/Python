@@ -1,0 +1,120 @@
+from datetime import datetime
+from tkinter.filedialog import askopenfilename
+import pandas as pd
+import numpy as np
+import os
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+
+# Load data
+df = askopenfilename(title="R Rajesh", filetypes=[("Excel files", "*.xlsx *.xls")])
+data = pd.read_excel(df, skiprows=5)
+lenght =  len(data['Col'].dropna())
+data= data.iloc[:lenght]
+
+data['Disc %'] = data['Disc %'].apply(lambda x: -x if x >= 0 else x)
+
+# Define filter criteria
+colors = ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']
+clarity = ['IF', 'VVS1', 'VVS2', 'VS1', 'VS2', 'SI1', 'SI2']
+cut = ['EX', 'VG']
+flour = ['NONE', 'FNT', 'MED']
+table_black = ['NONE', 'PINPOINT']
+culet = ['VERY SMALL']
+key_symbol = ['Cavity', 'Cavity', 'Chip','Cavity, Chip','Chip, Cavity'] 
+tb = ['TBL2','TBL3']
+sb = ['SBL2','SBL3']
+tw = ['CW3']
+sw = ['SW3']
+milky = ['NONE','']
+open_table = ['MEDIUM TABLE OPEN','SMALL TABLE OPEN']
+# Apply filters
+data = data[data['Lab'] == 'GIA']
+data = data[data['Shape'] == 'ROUND']
+data = data[(data['Carat'] >= 0.30) & (data['Carat'] <= 3.99)]
+data = data[data['Location'] == 'INDIA']
+data = data[data['Disc %'] <= -10]
+
+# Additional filtering
+data = data[data['Col'].isin(colors)]
+data = data[data['Clarity'].isin(clarity)]
+data = data[data['Cut'].isin(cut) & data['Pol'].isin(cut) & data['Sym'].isin(cut)]
+data = data[data['Fls'].isin(flour)]
+data = data[data['Tinge'].isin(milky)]
+data = data[~data['TB'].isin(tb)]
+data = data[~data['SB'].isin(sb)]
+data = data[~data['TW'].isin(tw)]
+data = data[~data['SW'].isin(sw)]
+data = data[~data['Culet'].isin(culet)]
+data = data[data['Milky'].isin(milky)]
+data = data[~data['Open On Table'].isin(open_table)]
+data = data[~data['Report Comments'].str.startswith("Clarity", na=False)]
+
+# Function to concatenate dataframes
+def concatenate_dataframes(df, column_names):
+    concatenated = []
+    for sub_df in df.values():
+        for column_name in column_names:
+            if sub_df is not None and column_name in sub_df.columns:
+                concatenated.append(sub_df[column_name])
+                break
+    concatenated = [series for series in concatenated if not series.empty]
+    return pd.concat(concatenated, ignore_index=True) if concatenated else pd.Series(dtype='str')
+
+# Column mapping
+columns_mapping = {
+    'SRNO': [],
+    'LOTNO': ['Report No'],
+    'CARAT': ['Carat'],
+    'SHAPE': ['Shape'],
+    'COLOR': ['Col'],
+    'CLARITY': ['Clarity'],
+    'CUT': ['Cut'],
+    'POL': ['Pol'],
+    'SYM': ['Sym'],
+    'FLRC': ['Fls'],
+    'LENGTH': [],
+    'WIDTH': [],
+    'HEIGHT': [],
+    'TABLE': ['Table %'],
+    'DEPTH': ['TD%'],
+    'LAB': ['Lab'],
+    'DISC': ['Disc %'],
+    'TINCH': [],
+    'NATTS': [],
+    'RATIO': [],
+    'RAP': [],
+    'LUSTER': [],
+    'T OPENS': [],
+    'B OPENS': []
+}
+
+output_data = pd.DataFrame()
+
+# Populate output_data
+for column, keys in columns_mapping.items():
+    if column in ['LENGTH', 'WIDTH', 'HEIGHT', 'RATIO', 'RAP']:
+        output_data[column] = 0
+    elif column == 'SRNO':
+        output_data[column] = range(1, len(data) + 1)
+    elif column in ['TINCH', 'LUSTER', 'T OPENS', 'B OPENS']:
+        output_data[column] = 'N/A'
+    elif column == 'NATTS':
+        output_data[column] = 'CENTER - L'
+    elif not keys:
+        output_data[column] = np.nan
+    else:
+        output_data[column] = concatenate_dataframes({0: data}, keys)
+
+# Save output data as a CSV file
+output_dir = r"G:\Certificate\Python Output\DEAL Output"
+current_datetime = datetime.now().strftime("%d.%m.%Y")
+file_path = os.path.join(output_dir, f"r rajesh {current_datetime}.csv")
+
+try:
+    # Save the DataFrame to a CSV file
+    output_data.to_csv(file_path, index=False)
+    print(f"File successfully saved at: {file_path}")
+    os.startfile(file_path)
+except Exception as e:
+    print(f"An error occurred: {e}")
