@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diamond Sticker Printer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style id="pageStyle"></style>
+<style>
+  :root{
+    --bg:#f3f4f6; --panel:#ffffff; --ink:#1b1f24; --muted:#5f6670; --line:#d8dce1;
+    --accent:#0f5c8c; --accent-ink:#ffffff;
+    --sw:76mm; --sh:36mm; --fs:1;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 "Segoe UI",Arial,sans-serif}
+  .app{display:grid;grid-template-columns:340px 1fr;gap:16px;padding:16px;min-height:100vh}
+  @media (max-width:820px){.app{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:14px;align-self:start}
+  h1{font-size:18px;margin:0}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 6px}
+  label{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px}
+  input[type=number],select{width:110px;padding:5px 6px;border:1px solid var(--line);border-radius:4px;font:inherit}
+  .file{border:2px dashed var(--line);border-radius:6px;padding:14px;text-align:center;cursor:pointer;color:var(--muted)}
+  .file:hover,.file.drag{border-color:var(--accent);color:var(--accent)}
+  .btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:6px;padding:10px 14px;font:600 14px inherit;font-family:inherit;cursor:pointer}
+  .btn.secondary{background:transparent;color:var(--accent);border:1px solid var(--accent);padding:6px 10px;font-size:12px}
+  .btn:focus-visible{outline:3px solid #f5b400;outline-offset:2px}
+  .note{font-size:12px;color:var(--muted)}
+  .rows{max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:4px}
+  .rows table{border-collapse:collapse;width:100%;font-size:12px}
+  .rows th,.rows td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+  .rows th{position:sticky;top:0;background:var(--panel)}
+  .rows input[type=number]{width:48px;padding:2px 4px}
+  .preview{display:flex;flex-wrap:wrap;gap:12px;align-content:flex-start}
+  .status{font-size:13px;color:var(--muted)}
+
+  /* ---------- STICKER ---------- */
+  .sticker{width:var(--sw);height:var(--sh);background:#fff;color:#000;border:1px solid #bbb;border-radius:2mm;
+    padding:1.6mm 2.4mm;font-family:Arial,Helvetica,sans-serif;overflow:hidden;display:flex;flex-direction:column;
+    font-size:calc(3.1mm * var(--fs));line-height:1.18}
+  .s-top{display:flex;justify-content:space-between;align-items:baseline;gap:2mm}
+  .s-id{font-weight:700;font-size:1.55em;white-space:nowrap}
+  .s-meas{font-size:.95em;white-space:nowrap}
+  .s-sub{font-weight:700;font-size:1.3em;white-space:nowrap;margin-top:.2mm}
+  .s-gia{font-size:1.05em;font-weight:600;margin:.3mm 0 .8mm}
+  .s-grid{display:grid;grid-template-columns:1fr 1.25fr;column-gap:3mm;flex:1}
+  .s-col{display:grid;grid-template-columns:auto auto 1fr;column-gap:1.2mm;align-content:space-evenly}
+  .s-col span{white-space:nowrap}
+  .s-col .v{font-weight:600}
+
+  @media print{
+    body{background:#fff}
+    .panel,.status{display:none!important}
+    .app{display:block;padding:0;min-height:0}
+    .preview{display:block}
+    .sticker{border:0;border-radius:0;break-inside:avoid;page-break-inside:avoid}
+    .preview.mode-roll .sticker{page-break-after:always;break-after:page}
+    .preview.mode-roll .sticker:last-child{page-break-after:auto;break-after:auto}
+    .preview.mode-sheet{display:grid;grid-template-columns:repeat(var(--cols),var(--sw));gap:var(--gap)}
+    .preview.mode-sheet .sticker{border:1px dashed #999}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="panel">
+    <h1>Diamond Sticker Printer</h1>
+
+    <div>
+      <h2>1. Load Excel</h2>
+      <div class="file" id="drop" tabindex="0">Click or drop an .xlsx / .xls / .csv file<input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
+      <p class="note">Expected headers: Stock id, Gia, Clarity, Colour, Cut, Pol, Sym, Flrc, MEASUREMENT, WT, DEPTH, TABLE, Crown, Pavillion, Girdle. Optional: Shape, Lot (shown on line 2 / top centre).</p>
+    </div>
+
+    <div>
+      <h2>2. Sticker size</h2>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label>Width (mm) <input type="number" id="w" value="76" step="0.5"></label>
+        <label>Height (mm) <input type="number" id="h" value="36" step="0.5"></label>
+        <label>Text size % <input type="number" id="fs" value="100" step="5"></label>
+      </div>
+    </div>
+
+    <div>
+      <h2>3. Print layout</h2>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label>Mode
+          <select id="mode">
+            <option value="roll">Label printer (1 per label)</option>
+            <option value="sheet">A4 sheet (grid)</option>
+          </select>
+        </label>
+        <label id="colsRow" hidden>Columns on A4 <input type="number" id="cols" value="2" min="1"></label>
+        <label id="gapRow" hidden>Gap (mm) <input type="number" id="gap" value="3" step="0.5"></label>
+      </div>
+    </div>
+
+    <div>
+      <h2 style="display:flex;justify-content:space-between;align-items:center">4. Select stones
+        <span><button class="btn secondary" id="all">All</button> <button class="btn secondary" id="none">None</button></span></h2>
+      <div class="rows"><table><thead><tr><th></th><th>Stock id</th><th>GIA</th><th>Wt</th><th>Copies</th></tr></thead><tbody id="tbody"></tbody></table></div>
+    </div>
+
+    <button class="btn" id="print">Print stickers</button>
+    <p class="note">In the print dialog set Margins = None, Scale = 100%, and untick Headers and footers. For a label printer, pick the label size as the paper size.</p>
+  </aside>
+
+  <main>
+    <p class="status" id="status"></p>
+    <div class="preview mode-roll" id="preview"></div>
+  </main>
+</div>
+
+<script>
+// ---------- column mapping (header names are matched case/space-insensitively) ----------
+const ALIASES = {
+  stock:['stockid','stock','stoneid','stockno','packetno','mfgno','id'],
+  gia:['gia','certno','certificate','reportno','gianumber','certificateno'],
+  shape:['shape','shp'],
+  lot:['lot','lotno','code','rate','price'],
+  clarity:['clarity','purity','clr'],
+  color:['colour','color','col'],
+  cut:['cut'],
+  pol:['pol','polish'],
+  sym:['sym','symm','symmetry'],
+  flrc:['flrc','fluo','fluorescence','flr','fl'],
+  meas:['measurement','measurements','meas','diameter'],
+  wt:['wt','weight','carat','cts','crt'],
+  depth:['depth','depth%','totaldepth'],
+  table:['table','table%'],
+  crown:['crown','crownangle','crang'],
+  pav:['pavillion','pavilion','pavangle','pavilionangle','pavillionangle','pav'],
+  girdle:['girdle','gridle']
+};
+const norm = s => String(s??'').toLowerCase().replace(/[^a-z0-9%]/g,'');
+
+function mapRow(raw){
+  const keys = Object.keys(raw); const out = {};
+  for (const [f,al] of Object.entries(ALIASES)){
+    const k = keys.find(k => al.includes(norm(k)));
+    out[f] = k!==undefined ? raw[k] : '';
+  }
+  return out;
+}
+
+// ---------- value formatting ----------
+const isNum = v => v!=='' && v!==null && !isNaN(Number(v));
+const pct = v => { if(!isNum(v)) return v??''; let n=Number(v); if(Math.abs(n)<=1) n*=100; return n.toFixed(2)+' %'; };
+const deg = v => { if(!isNum(v)) return v??''; return Number(v).toFixed(2)+'°'; };
+const wt  = v => isNum(v) ? Number(v).toFixed(2) : (v??'');
+const gia = v => { const s=String(v??'').trim(); if(!s) return ''; return /^gia/i.test(s)? s.toUpperCase() : 'GIA-'+s; };
+const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---------- state ----------
+let rows = [];  // {d, sel, copies}
+const SAMPLE = [{"Stock id":"nnnnnnn","Gia":155555555,"Clarity":"IF","Colour":"I","Cut":"EX","Pol":"EX","Sym":"EX","Flrc":"NONE","MEASUREMENT":"6.43 - 4.46 X 3.96","WT":1,"DEPTH":0.615,"TABLE":0.59,"Crown":34,"Pavillion":0.44,"Girdle":"MED TO STK"}];
+
+function load(list, label){
+  rows = list.map(mapRow).filter(d => Object.values(d).some(v => String(v).trim()!==''))
+             .map(d => ({d, sel:true, copies:1}));
+  document.getElementById('status').textContent = rows.length + ' stone(s) loaded from ' + label + '. Preview below is actual print size.';
+  renderTable(); renderPreview();
+}
+
+function stickerHTML(d){
+  const line2 = String(d.shape??'').trim();
+  const L = [['Clarity',d.clarity],['Color',d.color],['Cut',d.cut],['Polish',d.pol],['Symm',d.sym],['Flrc',d.flrc]];
+  const R = [['Wt.',wt(d.wt)],['Depth',pct(d.depth)],['Table',pct(d.table)],['Crown',deg(d.crown)],['Pavillion',pct(d.pav)],['Girdle',d.girdle]];
+  const col = a => a.map(([k,v])=>`<span>${k}</span><span>:</span><span class="v">${esc(v)}</span>`).join('');
+  return `<div class="sticker">
+    <div class="s-top"><span class="s-id">${esc(d.stock)}</span>${d.lot!==''?`<span class="s-id" style="font-size:1.35em">${esc(d.lot)}</span>`:''}<span class="s-meas">${esc(d.meas)}</span></div>
+    ${line2?`<div class="s-sub">${esc(line2)}</div>`:''}
+    <div class="s-gia">${esc(gia(d.gia))}</div>
+    <div class="s-grid"><div class="s-col">${col(L)}</div><div class="s-col">${col(R)}</div></div>
+  </div>`;
+}
+
+function renderTable(){
+  document.getElementById('tbody').innerHTML = rows.map((r,i)=>`<tr>
+    <td><input type="checkbox" id="sel${i}" data-i="${i}" ${r.sel?'checked':''}></td>
+    <td>${esc(r.d.stock)}</td><td>${esc(r.d.gia)}</td><td>${esc(wt(r.d.wt))}</td>
+    <td><input type="number" id="cp${i}" data-c="${i}" value="${r.copies}" min="1"></td></tr>`).join('');
+}
+
+function renderPreview(){
+  const html=[];
+  rows.forEach(r=>{ if(!r.sel) return; for(let k=0;k<Math.max(1,r.copies|0);k++) html.push(stickerHTML(r.d)); });
+  document.getElementById('preview').innerHTML = html.join('') || '<p class="status">No stones selected.</p>';
+  applySettings();
+}
+
+function applySettings(){
+  const w=+document.getElementById('w').value||76, h=+document.getElementById('h').value||36;
+  const fs=(+document.getElementById('fs').value||100)/100, mode=document.getElementById('mode').value;
+  const cols=+document.getElementById('cols').value||2, gap=+document.getElementById('gap').value||0;
+  const root=document.documentElement.style;
+  root.setProperty('--sw',w+'mm'); root.setProperty('--sh',h+'mm'); root.setProperty('--fs',fs);
+  root.setProperty('--cols',cols); root.setProperty('--gap',gap+'mm');
+  const pv=document.getElementById('preview'); pv.className='preview mode-'+mode;
+  document.getElementById('colsRow').hidden = document.getElementById('gapRow').hidden = mode!=='sheet';
+  document.getElementById('pageStyle').textContent = mode==='roll'
+    ? `@page{size:${w}mm ${h}mm;margin:0}`
+    : `@page{size:A4;margin:8mm}`;
+}
+
+// ---------- events ----------
+const fileIn=document.getElementById('file'), drop=document.getElementById('drop');
+function readFile(f){
+  if(!f) return;
+  const rd=new FileReader();
+  rd.onload=e=>{
+    try{
+      const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      load(XLSX.utils.sheet_to_json(ws,{defval:''}), f.name);
+    }catch(err){ document.getElementById('status').textContent='Could not read '+f.name+': '+err.message; }
+  };
+  rd.readAsArrayBuffer(f);
+}
+drop.onclick=()=>fileIn.click();
+drop.onkeydown=e=>{if(e.key==='Enter'||e.key===' ')fileIn.click();};
+fileIn.onchange=()=>readFile(fileIn.files[0]);
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('drag');};
+drop.ondragleave=()=>drop.classList.remove('drag');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('drag');readFile(e.dataTransfer.files[0]);};
+
+document.getElementById('tbody').addEventListener('input',e=>{
+  const t=e.target;
+  if(t.dataset.i!==undefined) rows[t.dataset.i].sel=t.checked;
+  if(t.dataset.c!==undefined) rows[t.dataset.c].copies=Math.max(1,parseInt(t.value)||1);
+  renderPreview();
+});
+document.getElementById('all').onclick=()=>{rows.forEach(r=>r.sel=true);renderTable();renderPreview();};
+document.getElementById('none').onclick=()=>{rows.forEach(r=>r.sel=false);renderTable();renderPreview();};
+['w','h','fs','mode','cols','gap'].forEach(id=>document.getElementById(id).addEventListener('input',applySettings));
+document.getElementById('print').onclick=()=>window.print();
+
+if(typeof XLSX==='undefined') document.getElementById('status').textContent='Excel reader did not load (needs internet). CSV/Excel upload will not work until it does.';
+load(SAMPLE,'sample data (SAMPLE.xlsx)');
+</script>
+</body>
+</html>
